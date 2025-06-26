@@ -1,0 +1,399 @@
+# Configurações Necessárias - Flutter Location Tracker
+
+## 1. Configurações Android
+
+### android/app/src/main/AndroidManifest.xml
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Permissões de localização -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    
+    <!-- Permissões de rede -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- Permissões para background tasks -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:label="Location Tracker"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme" />
+              
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        
+        <!-- WorkManager -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup" />
+        </provider>
+        
+        <!-- Background Location Service -->
+        <service
+            android:name="be.tramckrijte.workmanager.BackgroundWorker"
+            android:exported="false" />
+            
+        <!-- Boot Receiver -->
+        <receiver
+            android:name="be.tramckrijte.workmanager.BackgroundWorker$BackgroundWorkerBroadcastReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+</manifest>
+```
+
+### android/app/build.gradle
+```gradle
+android {
+    compileSdkVersion 34
+    ndkVersion flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    defaultConfig {
+        applicationId "com.example.location_tracker"
+        minSdkVersion 21
+        targetSdkVersion 34
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+        multiDexEnabled true
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+        }
+    }
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+    implementation 'androidx.multidex:multidex:2.0.1'
+}
+```
+
+## 2. Configurações iOS
+
+### ios/Runner/Info.plist
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Configurações básicas do app -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Location Tracker</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>location_tracker</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(FLUTTER_BUILD_NAME)</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleVersion</key>
+    <string>$(FLUTTER_BUILD_NUMBER)</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIMainStoryboardFile</key>
+    <string>Main</string>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    
+    <!-- Permissões de localização -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Este aplicativo precisa acessar sua localização para fornecer serviços baseados em localização.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Este aplicativo precisa acessar sua localização continuamente para rastreamento em segundo plano, mesmo quando não estiver em uso.</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>Este aplicativo precisa acessar sua localização continuamente para rastreamento em segundo plano.</string>
+    
+    <!-- Background Modes -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>location</string>
+        <string>background-processing</string>
+        <string>background-fetch</string>
+    </array>
+    
+    <!-- Prevent app from being terminated -->
+    <key>UIApplicationExitsOnSuspend</key>
+    <false/>
+</dict>
+</plist>
+```
+
+## 3. Configurações do Projeto Flutter
+
+### pubspec.yaml
+```yaml
+name: location_tracker
+description: Aplicativo para rastreamento de localização em segundo plano
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Location and permissions
+  geolocator: ^10.1.0
+  permission_handler: ^11.1.0
+  
+  # Background processing
+  workmanager: ^0.5.2
+  
+  # State management
+  provider: ^6.1.1
+  
+  # Storage
+  shared_preferences: ^2.2.2
+  sqflite: ^2.3.0
+  path: ^1.8.3
+  
+  # Network
+  http: ^1.1.0
+  
+  # UI
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+```
+
+## 4. Configurações Avançadas
+
+### Background Location Service (Android)
+Crie o arquivo `android/app/src/main/kotlin/com/example/location_tracker/LocationService.kt`:
+
+```kotlin
+package com.example.location_tracker
+
+import android.app.*
+import android.content.Context
+import android.content.Intent
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+
+class LocationService : Service(), LocationListener {
+    private lateinit var locationManager: LocationManager
+    private val NOTIFICATION_ID = 1001
+    private val CHANNEL_ID = "location_channel"
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID, createNotification())
+        startLocationUpdates()
+        return START_STICKY
+    }
+
+    private fun startLocationUpdates() {
+        try {
+            locationManager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                60000, // 1 minute
+                10f, // 10 meters
+                this
+            )
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Location Tracking",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun createNotification(): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Location Tracker")
+            .setContentText("Rastreando localização em segundo plano")
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
+
+    override fun onLocationChanged(location: Location) {
+        // Save location to database or send to server
+        // This will be handled by the Flutter side
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+```
+
+### iOS Background Configuration
+Para iOS, você também pode adicionar configurações no `ios/Runner/AppDelegate.swift`:
+
+```swift
+import UIKit
+import Flutter
+import CoreLocation
+
+@UIApplicationMain
+@objc class AppDelegate: FlutterAppDelegate, CLLocationManagerDelegate {
+    private var locationManager: CLLocationManager?
+    
+    override func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        GeneratedPluginRegistrant.register(with: self)
+        
+        // Initialize location manager for background
+        locationManager = CLLocationManager()
+        locationManager?.delegate = self
+        locationManager?.allowsBackgroundLocationUpdates = true
+        locationManager?.pausesLocationUpdatesAutomatically = false
+        
+        return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    }
+    
+    // Handle background location updates
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // Forward to Flutter side if needed
+        print("Background location update: \(locations.last?.coordinate ?? CLLocationCoordinate2D())")
+    }
+}
+```
+
+## 5. Comandos de Build
+
+### Para Android:
+```bash
+flutter build apk --release
+# ou para App Bundle:
+flutter build appbundle --release
+```
+
+### Para iOS:
+```bash
+flutter build ios --release
+```
+
+## 6. Testes
+
+### Teste em Dispositivo Real
+```bash
+# Android
+flutter run --release
+
+# iOS (requer dispositivo físico para teste de background)
+flutter run --release --device-id [DEVICE_ID]
+```
+
+### Debug Background Tasks
+Para Android, use:
+```bash
+adb logcat | grep -i location
+```
+
+Para iOS, use o Xcode Console ou:
+```bash
+xcrun simctl spawn booted log stream --predicate 'subsystem contains "location"'
+```
+
+## 7. Considerações Importantes
+
+### Performance
+- Use `geolocator` com configurações otimizadas
+- Implemente cache local para quando não há internet
+- Limite a frequência de updates para economizar bateria
+
+### Privacidade
+- Sempre explique claramente por que precisa da localização
+- Permita ao usuário desativar o rastreamento
+- Implemente configurações de privacidade
+
+### Publicação
+- **Google Play**: Declare uso de localização em background
+- **App Store**: Justifique necessidade de localização "Always"
+- Prepare documentação detalhada sobre o uso
+
+### Limitações
+- **iOS**: Sistema pode suspender o app se consumir muita bateria
+- **Android**: A partir do Android 8.0, há limitações para services em background
+- **Ambos**: Usuário pode desativar permissões a qualquer momento
