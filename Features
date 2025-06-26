@@ -1,0 +1,1201 @@
+// services/notification_service.dart
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+class NotificationService {
+  static final NotificationService _instance = NotificationService._internal();
+  factory NotificationService() => _instance;
+  NotificationService._internal();
+
+  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+
+  Future<void> initialize() async {
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+
+    const settings = InitializationSettings(
+      android: androidSettings,
+      iOS: iosSettings,
+    );
+
+    await _notifications.initialize(settings);
+    await _requestPermissions();
+  }
+
+  Future<void> _requestPermissions() async {
+    await Permission.notification.request();
+  }
+
+  Future<void> showLocationUpdateNotification(double lat, double lng) async {
+    const androidDetails = AndroidNotificationDetails(
+      'location_channel',
+      'Location Updates',
+      channelDescription: 'Notifications for location updates',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
+    );
+
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: false,
+    );
+
+    const details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    await _notifications.show(
+      1,
+      'Location Tracker',
+      'Localização atualizada: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}',
+      details,
+    );
+  }
+
+  Future<void> showTrackingStatusNotification(bool isTracking) async {
+    const androidDetails = AndroidNotificationDetails(
+      'status_channel',
+      'Tracking Status',
+      channelDescription: 'Status do rastreamento',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+
+    const iosDetails = DarwinNotificationDetails();
+
+    const details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    await _notifications.show(
+      2,
+      'Location Tracker',
+      isTracking ? 'Rastreamento iniciado' : 'Rastreamento parado',
+      details,
+    );
+  }
+
+  Future<void> cancelAll() async {
+    await _notifications.cancelAll();
+  }
+}
+
+// services/geofencing_service.dart
+import 'package:geolocator/geolocator.dart';
+import '../models/location_model.dart';
+
+class GeofencingService {
+  static final GeofencingService _instance = GeofencingService._internal();
+  factory GeofencingService() => _instance;
+  GeofencingService._internal();
+
+  final List<GeofenceRegion> _regions = [];
+
+  void addGeofence(GeofenceRegion region) {
+    _regions.add(region);
+  }
+
+  void removeGeofence(String id) {
+    _regions.removeWhere((region) => region.id == id);
+  }
+
+  List<GeofenceEvent> checkGeofences(LocationModel location) {
+    List<GeofenceEvent> events = [];
+
+    for (GeofenceRegion region in _regions) {
+      double distance = Geolocator.distanceBetween(
+        location.latitude,
+        location.longitude,
+        region.latitude,
+        region.longitude,
+      );
+
+      bool isInside = distance <= region.radius;
+      bool wasInside = region.isInside;
+
+      if (isInside && !wasInside) {
+        // Entrada na região
+        region.isInside = true;
+        events.add(GeofenceEvent(
+          region: region,
+          type: GeofenceEventType.enter,
+          location: location,
+          timestamp: DateTime.now(),
+        ));
+      } else if (!isInside && wasInside) {
+        // Saída da região
+        region.isInside = false;
+        events.add(GeofenceEvent(
+          region: region,
+          type: GeofenceEventType.exit,
+          location: location,
+          timestamp: DateTime.now(),
+        ));
+      }
+    }
+
+    return events;
+  }
+}
+
+class GeofenceRegion {
+  final String id;
+  final String name;
+  final double latitude;
+  final double longitude;
+  final double radius;
+  bool isInside;
+
+  GeofenceRegion({
+    required this.id,
+    required this.name,
+    required this.latitude,
+    required this.longitude,
+    required this.radius,
+    this.isInside = false,
+  });
+}
+
+class GeofenceEvent {
+  final GeofenceRegion region;
+  final GeofenceEventType type;
+  final LocationModel location;
+  final DateTime timestamp;
+
+  GeofenceEvent({
+    required this.region,
+    required this.type,
+    required this.location,
+    required this.timestamp,
+  });
+}
+
+enum GeofenceEventType { enter, exit }
+
+// services/analytics_service.dart
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../models/location_model.dart';
+
+class AnalyticsService {
+  static const String _baseUrl = 'https://sua-api.com/api/analytics';
+
+  static Future<LocationAnalytics> getLocationAnalytics({
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    try {
+      final queryParams = <String, String>{};
+      if (startDate != null) {
+        queryParams['start_date'] = startDate.toIso8601String();
+      }
+      if (endDate != null) {
+        queryParams['end_date'] = endDate.toIso8601String();
+      }
+
+      final uri = Uri.parse('$_baseUrl/location-stats').replace(
+        queryParameters: queryParams,
+      );
+
+      final response = await http.get(uri);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return LocationAnalytics.fromJson(data);
+      } else {
+        throw Exception('Falha ao carregar analytics');
+      }
+    } catch (e) {
+      throw Exception('Erro de rede: $e');
+    }
+  }
+
+  static Future<List<RouteStats>> getRouteAnalytics() async {
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/routes'));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        return data.map((json) => RouteStats.fromJson(json)).toList();
+      } else {
+        throw Exception('Falha ao carregar rotas');
+      }
+    } catch (e) {
+      throw Exception('Erro de rede: $e');
+    }
+  }
+}
+
+class LocationAnalytics {
+  final int totalLocations;
+  final double totalDistance;
+  final Duration totalTime;
+  final double averageSpeed;
+  final List<DailyStats> dailyStats;
+
+  LocationAnalytics({
+    required this.totalLocations,
+    required this.totalDistance,
+    required this.totalTime,
+    required this.averageSpeed,
+    required this.dailyStats,
+  });
+
+  factory LocationAnalytics.fromJson(Map<String, dynamic> json) {
+    return LocationAnalytics(
+      totalLocations: json['total_locations'],
+      totalDistance: json['total_distance'].toDouble(),
+      totalTime: Duration(seconds: json['total_time']),
+      averageSpeed: json['average_speed'].toDouble(),
+      dailyStats: (json['daily_stats'] as List)
+          .map((item) => DailyStats.fromJson(item))
+          .toList(),
+    );
+  }
+}
+
+class DailyStats {
+  final DateTime date;
+  final int locations;
+  final double distance;
+  final Duration time;
+
+  DailyStats({
+    required this.date,
+    required this.locations,
+    required this.distance,
+    required this.time,
+  });
+
+  factory DailyStats.fromJson(Map<String, dynamic> json) {
+    return DailyStats(
+      date: DateTime.parse(json['date']),
+      locations: json['locations'],
+      distance: json['distance'].toDouble(),
+      time: Duration(seconds: json['time']),
+    );
+  }
+}
+
+class RouteStats {
+  final String id;
+  final String name;
+  final DateTime startTime;
+  final DateTime endTime;
+  final double distance;
+  final Duration duration;
+  final double averageSpeed;
+  final List<LocationModel> waypoints;
+
+  RouteStats({
+    required this.id,
+    required this.name,
+    required this.startTime,
+    required this.endTime,
+    required this.distance,
+    required this.duration,
+    required this.averageSpeed,
+    required this.waypoints,
+  });
+
+  factory RouteStats.fromJson(Map<String, dynamic> json) {
+    return RouteStats(
+      id: json['id'],
+      name: json['name'],
+      startTime: DateTime.parse(json['start_time']),
+      endTime: DateTime.parse(json['end_time']),
+      distance: json['distance'].toDouble(),
+      duration: Duration(seconds: json['duration']),
+      averageSpeed: json['average_speed'].toDouble(),
+      waypoints: (json['waypoints'] as List)
+          .map((item) => LocationModel.fromMap(item))
+          .toList(),
+    );
+  }
+}
+
+// services/battery_optimization_service.dart
+import 'package:geolocator/geolocator.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+
+class BatteryOptimizationService {
+  static LocationSettings getOptimizedLocationSettings({
+    required double currentSpeed,
+    required double batteryLevel,
+    required bool isCharging,
+  }) {
+    // Ajusta configurações baseado no contexto
+    LocationAccuracy accuracy;
+    int distanceFilter;
+
+    if (isCharging) {
+      // Quando carregando, pode usar alta precisão
+      accuracy = LocationAccuracy.best;
+      distanceFilter = 5;
+    } else if (batteryLevel < 0.2) {
+      // Bateria baixa - modo economia extrema
+      accuracy = LocationAccuracy.lowest;
+      distanceFilter = 100;
+    } else if (batteryLevel < 0.5) {
+      // Bateria média - economia moderada
+      accuracy = LocationAccuracy.medium;
+      distanceFilter = 50;
+    } else {
+      // Bateria boa - precisão normal
+      accuracy = LocationAccuracy.high;
+      distanceFilter = 10;
+    }
+
+    // Ajusta baseado na velocidade
+    if (currentSpeed > 50) {
+      // Alta velocidade - pode usar menos precisão
+      accuracy = LocationAccuracy.medium;
+      distanceFilter = 20;
+    } else if (currentSpeed < 1) {
+      // Parado - reduz frequência
+      distanceFilter = 5;
+    }
+
+    return LocationSettings(
+      accuracy: accuracy,
+      distanceFilter: distanceFilter,
+    );
+  }
+
+  static Duration getOptimizedUpdateInterval({
+    required double batteryLevel,
+    required bool isCharging,
+    required double currentSpeed,
+  }) {
+    if (isCharging) {
+      return Duration(seconds: 30);
+    } else if (batteryLevel < 0.2) {
+      return Duration(minutes: 10);
+    } else if (batteryLevel < 0.5) {
+      return Duration(minutes: 5);
+    } else if (currentSpeed > 50) {
+      return Duration(seconds: 60);
+    } else {
+      return Duration(minutes: 2);
+    }
+  }
+
+  static Future<bool> isLocationOptimizationDisabled() async {
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      final androidInfo = await deviceInfo.androidInfo;
+      
+      // Verifica se o app está na whitelist de otimização de bateria
+      // No Android, isso precisa ser implementado nativamente
+      return false; // Placeholder
+    } catch (e) {
+      return false;
+    }
+  }
+}
+
+// widgets/location_map_widget.dart
+import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../models/location_model.dart';
+
+class LocationMapWidget extends StatefulWidget {
+  final List<LocationModel> locations;
+  final LocationModel? currentLocation;
+
+  const LocationMapWidget({
+    Key? key,
+    required this.locations,
+    this.currentLocation,
+  }) : super(key: key);
+
+  @override
+  _LocationMapWidgetState createState() => _LocationMapWidgetState();
+}
+
+class _LocationMapWidgetState extends State<LocationMapWidget> {
+  GoogleMapController? _controller;
+  Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _updateMapData();
+  }
+
+  @override
+  void didUpdateWidget(LocationMapWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.locations != widget.locations ||
+        oldWidget.currentLocation != widget.currentLocation) {
+      _updateMapData();
+    }
+  }
+
+  void _updateMapData() {
+    _updateMarkers();
+    _updatePolylines();
+  }
+
+  void _updateMarkers() {
+    Set<Marker> markers = {};
+
+    // Adiciona marcador da localização atual
+    if (widget.currentLocation != null) {
+      markers.add(
+        Marker(
+          markerId: MarkerId('current'),
+          position: LatLng(
+            widget.currentLocation!.latitude,
+            widget.currentLocation!.longitude,
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+          infoWindow: InfoWindow(
+            title: 'Localização Atual',
+            snippet: 'Precisão: ${widget.currentLocation!.accuracy.toStringAsFixed(1)}m',
+          ),
+        ),
+      );
+    }
+
+    // Adiciona marcadores do histórico (últimos 50)
+    List<LocationModel> recentLocations = widget.locations.take(50).toList();
+    for (int i = 0; i < recentLocations.length; i++) {
+      LocationModel location = recentLocations[i];
+      markers.add(
+        Marker(
+          markerId: MarkerId('location_$i'),
+          position: LatLng(location.latitude, location.longitude),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            i == 0 ? BitmapDescriptor.hueGreen : BitmapDescriptor.hueRed,
+          ),
+          infoWindow: InfoWindow(
+            title: i == 0 ? 'Mais Recente' : 'Histórico',
+            snippet: _formatDateTime(location.timestamp),
+          ),
+        ),
+      );
+    }
+
+    setState(() {
+      _markers = markers;
+    });
+  }
+
+  void _updatePolylines() {
+    if (widget.locations.length < 2) return;
+
+    List<LatLng> polylineCoordinates = widget.locations
+        .map((location) => LatLng(location.latitude, location.longitude))
+        .toList();
+
+    Polyline polyline = Polyline(
+      polylineId: PolylineId('route'),
+      points: polylineCoordinates,
+      color: Colors.blue,
+      width: 3,
+    );
+
+    setState(() {
+      _polylines = {polyline};
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.locations.isEmpty && widget.currentLocation == null) {
+      return Center(
+        child: Text('Nenhuma localização para exibir'),
+      );
+    }
+
+    LatLng center;
+    if (widget.currentLocation != null) {
+      center = LatLng(
+        widget.currentLocation!.latitude,
+        widget.currentLocation!.longitude,
+      );
+    } else {
+      center = LatLng(
+        widget.locations.first.latitude,
+        widget.locations.first.longitude,
+      );
+    }
+
+    return GoogleMap(
+      onMapCreated: (GoogleMapController controller) {
+        _controller = controller;
+      },
+      initialCameraPosition: CameraPosition(
+        target: center,
+        zoom: 15.0,
+      ),
+      markers: _markers,
+      polylines: _polylines,
+      myLocationEnabled: true,
+      myLocationButtonEnabled: true,
+      zoomControlsEnabled: true,
+      mapToolbarEnabled: true,
+    );
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    return '${dateTime.day}/${dateTime.month} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+// screens/analytics_screen.dart
+import 'package:flutter/material.dart';
+import '../services/analytics_service.dart';
+import '../widgets/charts/distance_chart.dart';
+import '../widgets/charts/speed_chart.dart';
+
+class AnalyticsScreen extends StatefulWidget {
+  @override
+  _AnalyticsScreenState createState() => _AnalyticsScreenState();
+}
+
+class _AnalyticsScreenState extends State<AnalyticsScreen> {
+  LocationAnalytics? _analytics;
+  List<RouteStats>? _routes;
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAnalytics();
+  }
+
+  Future<void> _loadAnalytics() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final analytics = await AnalyticsService.getLocationAnalytics(
+        startDate: DateTime.now().subtract(Duration(days: 30)),
+        endDate: DateTime.now(),
+      );
+      
+      final routes = await AnalyticsService.getRouteAnalytics();
+
+      setState(() {
+        _analytics = analytics;
+        _routes = routes;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Analytics'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: _loadAnalytics,
+          ),
+        ],
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error, size: 64, color: Colors.red),
+            SizedBox(height: 16),
+            Text('Erro ao carregar analytics'),
+            SizedBox(height: 8),
+            Text(_error!, style: TextStyle(color: Colors.grey)),
+            SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadAnalytics,
+              child: Text('Tentar Novamente'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_analytics == null) {
+      return Center(child: Text('Nenhum dado disponível'));
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadAnalytics,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSummaryCards(),
+            SizedBox(height: 24),
+            _buildChartsSection(),
+            SizedBox(height: 24),
+            _buildRoutesSection(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryCards() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Resumo dos Últimos 30 Dias',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _buildSummaryCard(
+                'Total de Localizações',
+                _analytics!.totalLocations.toString(),
+                Icons.location_on,
+                Colors.blue,
+              ),
+            ),
+            SizedBox(width: 16),
+            Expanded(
+              child: _buildSummaryCard(
+                'Distância Total',
+                '${(_analytics!.totalDistance / 1000).toStringAsFixed(1)} km',
+                Icons.straighten,
+                Colors.green,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _buildSummaryCard(
+                'Tempo Total',
+                _formatDuration(_analytics!.totalTime),
+                Icons.timer,
+                Colors.orange,
+              ),
+            ),
+            SizedBox(width: 16),
+            Expanded(
+              child: _buildSummaryCard(
+                'Velocidade Média',
+                '${_analytics!.averageSpeed.toStringAsFixed(1)} km/h',
+                Icons.speed,
+                Colors.purple,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummaryCard(String title, String value, IconData icon, Color color) {
+    return Card(
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Icon(icon, size: 32, color: color),
+            SizedBox(height: 8),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChartsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Gráficos',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Distância Diária',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                SizedBox(height: 16),
+                Container(
+                  height: 200,
+                  child: DistanceChart(dailyStats: _analytics!.dailyStats),
+                ),
+              ],
+            ),
+          ),
+        ),
+        SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Velocidade por Período',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                SizedBox(height: 16),
+                Container(
+                  height: 200,
+                  child: SpeedChart(routes: _routes ?? []),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRoutesSection() {
+    if (_routes == null || _routes!.isEmpty) {
+      return SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Rotas Recentes',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        SizedBox(height: 16),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          itemCount: _routes!.length,
+          itemBuilder: (context, index) {
+            RouteStats route = _routes![index];
+            return Card(
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: Colors.blue,
+                  child: Icon(Icons.route, color: Colors.white),
+                ),
+                title: Text(route.name),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${(route.distance / 1000).toStringAsFixed(1)} km'),
+                    Text(_formatDuration(route.duration)),
+                  ],
+                ),
+                trailing: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '${route.averageSpeed.toStringAsFixed(1)}',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text('km/h', style: TextStyle(fontSize: 12)),
+                  ],
+                ),
+                onTap: () {
+                  _showRouteDetails(route);
+                },
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  void _showRouteDetails(RouteStats route) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(route.name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Início: ${_formatDateTime(route.startTime)}'),
+            Text('Fim: ${_formatDateTime(route.endTime)}'),
+            Text('Distância: ${(route.distance / 1000).toStringAsFixed(2)} km'),
+            Text('Duração: ${_formatDuration(route.duration)}'),
+            Text('Velocidade Média: ${route.averageSpeed.toStringAsFixed(1)} km/h'),
+            Text('Pontos: ${route.waypoints.length}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Fechar'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // Navegar para mapa da rota
+            },
+            child: Text('Ver no Mapa'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    int hours = duration.inHours;
+    int minutes = duration.inMinutes % 60;
+    
+    if (hours > 0) {
+      return '${hours}h ${minutes}m';
+    } else {
+      return '${minutes}m';
+    }
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    return '${dateTime.day}/${dateTime.month}/${dateTime.year} '
+           '${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+// widgets/charts/distance_chart.dart
+import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import '../../services/analytics_service.dart';
+
+class DistanceChart extends StatelessWidget {
+  final List<DailyStats> dailyStats;
+
+  const DistanceChart({Key? key, required this.dailyStats}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    if (dailyStats.isEmpty) {
+      return Center(child: Text('Nenhum dado disponível'));
+    }
+
+    return LineChart(
+      LineChartData(
+        gridData: FlGridData(show: true),
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 40,
+              getTitlesWidget: (value, meta) {
+                return Text(
+                  '${(value / 1000).toStringAsFixed(0)}km',
+                  style: TextStyle(fontSize: 10),
+                );
+              },
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 30,
+              getTitlesWidget: (value, meta) {
+                int index = value.toInt();
+                if (index >= 0 && index < dailyStats.length) {
+                  return Text(
+                    '${dailyStats[index].date.day}/${dailyStats[index].date.month}',
+                    style: TextStyle(fontSize: 10),
+                  );
+                }
+                return Text('');
+              },
+            ),
+          ),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        borderData: FlBorderData(show: true),
+        lineBarsData: [
+          LineChartBarData(
+            spots: dailyStats.asMap().entries.map((entry) {
+              return FlSpot(entry.key.toDouble(), entry.value.distance);
+            }).toList(),
+            isCurved: true,
+            color: Colors.blue,
+            barWidth: 3,
+            dotData: FlDotData(show: true),
+            belowBarData: BarAreaData(
+              show: true,
+              color: Colors.blue.withOpacity(0.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// widgets/charts/speed_chart.dart
+import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import '../../services/analytics_service.dart';
+
+class SpeedChart extends StatelessWidget {
+  final List<RouteStats> routes;
+
+  const SpeedChart({Key? key, required this.routes}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    if (routes.isEmpty) {
+      return Center(child: Text('Nenhum dado disponível'));
+    }
+
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: routes.map((r) => r.averageSpeed).reduce((a, b) => a > b ? a : b) * 1.2,
+        barTouchData: BarTouchData(
+          touchTooltipData: BarTouchTooltipData(
+            tooltipBgColor: Colors.blueGrey,
+            getTooltipItem: (group, groupIndex, rod, rodIndex) {
+              return BarTooltipItem(
+                '${routes[group.x.toInt()].name}\n',
+                TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+                children: [
+                  TextSpan(
+                    text: '${rod.toY.toStringAsFixed(1)} km/h',
+                    style: TextStyle(
+                      color: Colors.yellow,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        titlesData: FlTitlesData(
+          show: true,
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (double value, TitleMeta meta) {
+                int index = value.toInt();
+                if (index >= 0 && index < routes.length) {
+                  return Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      routes[index].name.length > 10 
+                        ? '${routes[index].name.substring(0, 10)}...'
+                        : routes[index].name,
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 10,
+                      ),
+                    ),
+                  );
+                }
+                return Text('');
+              },
+              reservedSize: 38,
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 40,
+              getTitlesWidget: (value, meta) {
+                return Text(
+                  '${value.toInt()}',
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        borderData: FlBorderData(show: false),
+        barGroups: routes.asMap().entries.map((entry) {
+          return BarChartGroupData(
+            x: entry.key,
+            barRods: [
+              BarChartRodData(
+                toY: entry.value.averageSpeed,
+                color: Colors.lightBlueAccent,
+                width: 16,
+                borderRadius: BorderRadius.circular(4),
+                backDrawRodData: BackgroundBarChartRodData(
+                  show: true,
+                  toY: routes.map((r) => r.averageSpeed).reduce((a, b) => a > b ? a : b) * 1.2,
+                  color: Colors.grey[300],
+                ),
+              ),
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// utils/location_utils.dart
+import 'dart:math';
+import '../models/location_model.dart';
+
+class LocationUtils {
+  static double calculateDistance(LocationModel from, LocationModel to) {
+    const double earthRadius = 6371000; // metros
+    
+    double lat1Rad = from.latitude * pi / 180;
+    double lat2Rad = to.latitude * pi / 180;
+    double deltaLatRad = (to.latitude - from.latitude) * pi / 180;
+    double deltaLngRad = (to.longitude - from.longitude) * pi / 180;
+
+    double a = sin(deltaLatRad / 2) * sin(deltaLatRad / 2) +
+        cos(lat1Rad) * cos(lat2Rad) *
+        sin(deltaLngRad / 2) * sin(deltaLngRad / 2);
+    
+    double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+
+    return earthRadius * c;
+  }
+
+  static double calculateTotalDistance(List<LocationModel> locations) {
+    if (locations.length < 2) return 0;
+
+    double totalDistance = 0;
+    for (int i = 1; i < locations.length; i++) {
+      totalDistance += calculateDistance(locations[i - 1], locations[i]);
+    }
+    return totalDistance;
+  }
+
+  static double calculateAverageSpeed(List<LocationModel> locations) {
+    if (locations.length < 2) return 0;
+
+    double totalDistance = calculateTotalDistance(locations);
+    Duration totalTime = locations.last.timestamp.difference(locations.first.timestamp);
+    
+    if (totalTime.inSeconds == 0) return 0;
+    
+    // Retorna em m/s
+    return totalDistance / totalTime.inSeconds;
+  }
+
+  static List<LocationModel> filterByAccuracy(
+    List<LocationModel> locations, 
+    double maxAccuracy
+  ) {
+    return locations.where((location) => location.accuracy <= maxAccuracy).toList();
+  }
+
+  static List<LocationModel> filterByTimeRange(
+    List<LocationModel> locations,
+    DateTime startTime,
+    DateTime endTime,
+  ) {
+    return locations.where((location) {
+      return location.timestamp.isAfter(startTime) && 
+             location.timestamp.isBefore(endTime);
+    }).toList();
+  }
+
+  static List<LocationModel> removeOutliers(List<LocationModel> locations) {
+    if (locations.length < 3) return locations;
+
+    List<LocationModel> filtered = [locations.first];
+    
+    for (int i = 1; i < locations.length - 1; i++) {
+      LocationModel prev = locations[i - 1];
+      LocationModel current = locations[i];
+      LocationModel next = locations[i + 1];
+      
+      double distToPrev = calculateDistance(prev, current);
+      double distToNext = calculateDistance(current, next);
+      
+      // Se a distância for muito grande comparada à precisão, pode ser outlier
+      if (distToPrev < current.accuracy * 10 && distToNext < current.accuracy * 10) {
+        filtered.add(current);
+      }
+    }
+    
+    filtered.add(locations.last);
+    return filtered;
+  }
+
+  static String formatCoordinate(double coordinate, {int decimals = 6}) {
+    return coordinate.toStringAsFixed(decimals);
+  }
+
+  static String formatDistance(double distance) {
+    if (distance < 1000) {
+      return '${distance.toStringAsFixed(0)}m';
+    } else {
+      return '${(distance / 1000).toStringAsFixed(2)}km';
+    }
+  }
+
+  static String formatSpeed(double speedMs) {
+    double speedKmh = speedMs * 3.6;
+    return '${speedKmh.toStringAsFixed(1)} km/h';
+  }
+}
