@@ -1,0 +1,72 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
+import '../database/db_helper.dart';
+
+class LoginProvider extends ChangeNotifier {
+  bool isLoading = false;
+  String? errorMessage;
+
+  /// URL da sua API de autenticação
+  static const _endpoint = 'https://seuapi.com/login';
+
+  Future<bool> login(String username, String password) async {
+    isLoading = true;
+    errorMessage = null;
+    notifyListeners();
+
+    // --- 1. WEB: exige login online -------------------------------
+    if (kIsWeb) {
+      final success = await _loginOnline(username, password);
+      isLoading = false;
+      notifyListeners();
+      return success;
+    }
+
+    // --- 2. MOBILE/DESKTOP: tenta online, cai para offline --------
+    try {
+      final online = await _loginOnline(username, password);
+      if (online) {
+        // Salva (ou atualiza) credenciais localmente para uso offline
+        await DBHelper.insertUser(username, password);
+        isLoading = false;
+        notifyListeners();
+        return true;
+      }
+    } catch (_) {
+      // Ignorado para permitir fallback offline
+    }
+
+    // --- 3. Offline ------------------------------------------------
+    final localUser = await DBHelper.getUser(username, password);
+    if (localUser != null) {
+      isLoading = false;
+      notifyListeners();
+      return true;
+    }
+
+    errorMessage = 'Falha de conexão e usuário não encontrado localmente';
+    isLoading = false;
+    notifyListeners();
+    return false;
+  }
+
+  /// Autenticação via HTTP usando Dio
+  Future<bool> _loginOnline(String username, String password) async {
+    try {
+      final response = await Dio().post(
+        _endpoint,
+        data: {'username': username, 'password': password},
+        options: Options(connectTimeout: const Duration(seconds: 8)),
+      );
+
+      if (response.statusCode == 200) return true;
+
+      errorMessage = 'Usuário ou senha inválidos';
+      return false;
+    } on DioException catch (e) {
+      errorMessage = e.message;
+      rethrow; // Permite fallback no caller
+    }
+  }
+}
